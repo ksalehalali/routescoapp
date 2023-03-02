@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "823934870121",
+    "project_id": "routesapplicationnew",
+    "storage_bucket": "routesapplicationnew.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:823934870121:android:be401d2ce287663be438f8",
+        "android_client_info": {
+          "package_name": "com.routescoapp.routescoapp"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "823934870121-6dtp32f488jk6gh8k8s7k6qu6ngamcu3.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBZMYQ6fRfYibnsI3fF0jNAQA9Tx_mnELc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "823934870121-6dtp32f488jk6gh8k8s7k6qu6ngamcu3.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
