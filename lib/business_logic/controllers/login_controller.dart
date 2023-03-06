@@ -1,46 +1,81 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:get/get.dart';
+import 'package:get/get_core/src/get_main.dart';
+import 'package:get/get_navigation/src/extension_navigation.dart';
+import 'package:get/get_rx/src/rx_types/rx_types.dart';
+import 'package:get/get_state_manager/src/simple/get_controllers.dart';
 import 'package:http/http.dart' as http;
+
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../constants/strings.dart';
+import '../../Assistants/globals.dart';
+import '../../constants/current_data.dart';
+import '../../presentation/Auth/confirm_otp.dart';
 import '../../presentation/Auth/login.dart';
+import '../../presentation/screens/home/home_screen.dart';
 
-class RegistrationWebService {
-  var isLoginLoading = false;
+
+class LoginController extends GetxController {
+  var isLoginLoading = false.obs;
   var loginIcon = new Container(
       child: Icon(
     Icons.arrow_forward,
-  ));
+  )).obs;
 
   final usernameController = new TextEditingController();
   final passwordController = new TextEditingController();
-  String phoneNum = "";
-  var user;
-  late AndroidDeviceInfo androidInfo ;
-  late IosDeviceInfo iosInfo;
-  DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
-  // @override
-  // void onInit() {
-  //   // TODO: implement onInit
-  //   super.onInit();
-  //   getUserLoginPreference();
-  // }
-  // @override
-  // void onClose() {
-  //   super.onClose();
-  //   usernameController.dispose();
-  //   passwordController.dispose();
-  // }
+  RxString phoneNum = "".obs;
+  late AndroidDeviceInfo androidInfo;
 
+  DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
+
+  IosDeviceInfo? iosInfo;
+
+  @override
+  void onInit() async {
+    // TODO: implement onInit
+    super.onInit();
+    getUserLoginPreference();
+  }
+
+  @override
+  void onClose() {
+    super.onClose();
+    usernameController.dispose();
+    passwordController.dispose();
+  }
+
+  Future<bool> isConnected() async {
+    bool connected = false;
+    var connectivityResult = await (Connectivity().checkConnectivity());
+    if (connectivityResult == ConnectivityResult.mobile) {
+      // I am connected to a mobile network.
+      user.isConnected = true;
+      print('mobile.......');
+      connected = true;
+    } else if (connectivityResult == ConnectivityResult.wifi) {
+      // I am connected to a wifi network.
+      user.isConnected = true;
+
+      print('wifi.......');
+      connected = true;
+    } else if (connectivityResult == ConnectivityResult.none) {
+      // I am connected to a wifi network.
+      print('none.......');
+      connected = false;
+      user.isConnected = false;
+      isLoginLoading.value = false;
+    }
+    return connected;
+  }
 
   //logout
   Future<void> logout() async {
@@ -48,12 +83,12 @@ class RegistrationWebService {
     await prefs.setString('lastToken', prefs.getString('token')!);
     await prefs.setString('lastPhone', prefs.getString('phoneNumber')!);
 
-    isLoginLoading = false;
+    isLoginLoading.value = false;
     user.accessToken = '';
     prefs.remove('token');
     prefs.remove('lastToken');
     prefs.remove('id');
-    isLoginLoading = false;
+    isLoginLoading.value = false;
 
     prefs.remove('phoneNumber');
 
@@ -61,25 +96,34 @@ class RegistrationWebService {
   }
 
   //login
-  Future<Map?> makeLoginRequest(String userName, password) async {
+  Future<void> makeLoginRequest(BuildContext context) async {
+
+    if (Platform.isAndroid) {
+      androidInfo = await deviceInfo.androidInfo;
+
+    } else if(Platform.isIOS) {
+      iosInfo = await deviceInfo.iosInfo;
+    }
+//  isLoginLoading.value = true;
     final fcmToken = await FirebaseMessaging.instance.getToken();
     print(" 0000000000 FCM token: " + fcmToken!);
-    androidInfo = await deviceInfo.androidInfo;
-    iosInfo = await deviceInfo.iosInfo;
-
-    loginIcon = Container(
+    loginIcon.value = Container(
       child: CircularProgressIndicator(),
     );
 
+    List<String> loginCredentials = [
+      phoneNum.value.replaceAll("+", ""),
+      passwordController.text
+    ];
 
-    print("IIIINNNFFFOOO ${userName} : ${password}");
+    print("IIIINNNFFFOOO ${loginCredentials[0]} : ${loginCredentials[1]}");
 
     var head = {
       "Accept": "application/json",
       "content-type": "application/json"
     };
 
-    if (userName.isEmpty || password.isEmpty) {
+    if (loginCredentials[0].isEmpty || loginCredentials[1].isEmpty) {
       Fluttertoast.showToast(
           msg: "Please fill all the required information",
           toastLength: Toast.LENGTH_SHORT,
@@ -88,23 +132,27 @@ class RegistrationWebService {
           backgroundColor: Colors.white70,
           textColor: Colors.black,
           fontSize: 16.0);
-      isLoginLoading = false;
-      return null;
+      isLoginLoading.value = false;
     } else {
-      print("login data --=====$userName--$password-- $fcmToken");
+      print(
+          "login info ==-- ${loginCredentials[0]} -- ${loginCredentials[1]}  FCMToken: $fcmToken device id ${iosInfo?.utsname.nodename}");
+      print(
+          "device info.......  ${Platform.isAndroid == true ? androidInfo.id : iosInfo?.identifierForVendor}");
+
       var response = await http
-          .post(Uri.parse("$baseUrl/api/Login"),
+          .post(Uri.parse(baseURL + "/api/Login"),
               body: jsonEncode(
                 {
-                  "UserName": userName,
-                  "Password": password,
+                  "UserName": loginCredentials[0],
+                  "Password": loginCredentials[1],
                   "FCMToken": fcmToken,
-                  "UnicNumber": Platform.isAndroid ==true ? androidInfo.id :iosInfo.identifierForVendor
-
+                  "UnicNumber": Platform.isAndroid == true
+                      ? androidInfo.id
+                      : iosInfo?.identifierForVendor
                 },
               ),
               headers: head)
-          .timeout(const Duration(seconds: 10), onTimeout: () {
+          .timeout(const Duration(seconds: 12), onTimeout: () {
         Fluttertoast.showToast(
             msg: "The connection has timed out, Please try again!",
             toastLength: Toast.LENGTH_SHORT,
@@ -113,13 +161,14 @@ class RegistrationWebService {
             backgroundColor: Colors.white70,
             textColor: Colors.black,
             fontSize: 16.0);
-        isLoginLoading = false;
-        Get.offAll(() => LoginScreen());
+        isLoginLoading.value = false;
+       // Get.offAll(() => Login());
+        print("Time out ---.........");
+
         throw TimeoutException(
             'The connection has timed out, Please try again!');
       });
-
-      print("response --- ${response.body}");
+      print(response.body);
       if (response.statusCode == 500) {
         Fluttertoast.showToast(
             msg: "Error 500",
@@ -129,8 +178,7 @@ class RegistrationWebService {
             backgroundColor: Colors.white70,
             textColor: Colors.black,
             fontSize: 16.0);
-        isLoginLoading = false;
-        return null;
+        isLoginLoading.value = false;
       } else if (response.statusCode == 200) {
         var jsonResponse = json.decode(response.body);
         print('user info ::====::: $jsonResponse');
@@ -138,21 +186,58 @@ class RegistrationWebService {
           print(jsonResponse["description"]);
           print('==================================');
           print("my new token is ::: ${jsonResponse["description"]['token']}");
-
+          user.id = jsonResponse["description"]['id'];
           // TODO: store token in shared preferences then navigate to the following screen
           storeUserLoginPreference(
               jsonResponse["description"]["token"],
               jsonResponse["description"]["userName"],
-              password,
+              loginCredentials[1],
               jsonResponse["description"]["id"],
               jsonResponse["description"]["phoneNumber"],
               jsonResponse["description"]["guidUser"]);
-
-          // Get.offAll(MainScreen(indexOfScreen: 0,));
-          phoneNum = "";
+          user.accessToken = jsonResponse["description"]["token"];
+          Get.offAll(HomeScreen());
+          phoneNum.value = "";
 
           passwordController.text = "";
-          return jsonResponse["description"];
+        } else if (jsonResponse.toString().contains('You can\'t use more than one device')) {
+          showCupertinoDialog<String>(
+            context: context,
+            builder: (BuildContext context) => CupertinoAlertDialog(
+              title: Text('Add new device'.tr),
+              content:
+                  Text('You need to add this device and delete old one'.tr),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () async {
+                    Navigator.pop(context, 'Confirm_txt'.tr);
+                  },
+                  child: Text('Close_txt'.tr),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    Navigator.pop(context, 'Confirm_txt'.tr);
+                    print("User =============================== ${loginCredentials[0]}");
+                    resetDevice(loginCredentials[0], loginCredentials[1], context);
+                    //notify the user account deleted
+                    CupertinoAlertDialog(
+                      title: const Text('Account deleted'),
+                      content: const Text('Your account deleted'),
+                      actions: <Widget>[
+                        TextButton(
+                          onPressed: () async {
+                            Navigator.pop(context, 'Ok');
+                          },
+                          child: const Text('Ok'),
+                        ),
+                      ],
+                    );
+                  },
+                  child: Text('Confirm_txt'.tr),
+                ),
+              ],
+            ),
+          );
         } else {
           Fluttertoast.showToast(
               msg: "Username and password do not match!",
@@ -162,11 +247,11 @@ class RegistrationWebService {
               backgroundColor: Colors.white70,
               textColor: Colors.black,
               fontSize: 16.0);
-          return null;
         }
+        isLoginLoading.value = false;
       }
     }
-    loginIcon = Container(
+    loginIcon.value = Container(
       child: Icon(
         Icons.arrow_forward,
       ),
@@ -175,24 +260,33 @@ class RegistrationWebService {
 //    isLoginLoading.value = false;
   }
 
-  Future makeAutoLoginRequest(username, password) async {
+  Future<void> makeAutoLoginRequest(username, password) async {
+    if (Platform.isAndroid) {
+      androidInfo = await deviceInfo.androidInfo;
+
+    } else if(Platform.isIOS) {
+      iosInfo = await deviceInfo.iosInfo;
+    }
     final fcmToken = await FirebaseMessaging.instance.getToken();
-    print(" 0000000000 FCM token133: " + fcmToken!);
+    print(" 0000000000 FCM token1: auto" + fcmToken!);
 
     var head = {
       "Accept": "application/json",
       "content-type": "application/json"
     };
-
-    print("login info auto === $username -- $password -- $fcmToken");
-    var response = await http.post(Uri.parse("$baseUrl/api/Login"),
+print("device ${Platform.isAndroid == true
+    ? androidInfo.id
+    : iosInfo?.identifierForVendor} ........................................................");
+    var response = await http
+        .post(Uri.parse(baseURL + "/api/Login"),
             body: jsonEncode(
               {
                 "UserName": username,
                 "Password": password,
                 "FCMToken": fcmToken,
-                "UnicNumber": Platform.isAndroid ==true ? androidInfo.id :iosInfo.identifierForVendor
-
+                "UnicNumber": Platform.isAndroid == true
+                    ? androidInfo.id
+                    : iosInfo?.identifierForVendor
               },
             ),
             headers: head)
@@ -205,14 +299,13 @@ class RegistrationWebService {
           backgroundColor: Colors.white70,
           textColor: Colors.black,
           fontSize: 16.0);
-      isLoginLoading = false;
+      isLoginLoading.value = false;
 
       Get.offAll(() => LoginScreen());
 
       throw TimeoutException('The connection has timed out, Please try again!');
     });
     var jsonResponse = json.decode(response.body);
-    print(response);
 
     if (response.statusCode == 500) {
       Fluttertoast.showToast(
@@ -223,9 +316,9 @@ class RegistrationWebService {
           backgroundColor: Colors.white70,
           textColor: Colors.black,
           fontSize: 16.0);
-      isLoginLoading = false;
+      isLoginLoading.value = false;
+
       Get.to(() => LoginScreen());
-      return null;
     } else if (response.statusCode == 200) {
       print('user info ::==auto login==::: $jsonResponse');
 
@@ -249,13 +342,11 @@ class RegistrationWebService {
         //if(promoterId!="")saveInstallationForPromoters(promoterId);
 
         Timer(const Duration(milliseconds: 200), () {
-          return jsonResponse["description"];
 
-          /// Get.to(MainScreen(indexOfScreen: 0,));
+          ///
+          Get.to(HomeScreen( ));
         });
       } else {
-        print(response);
-
         Fluttertoast.showToast(
             msg: "Username and password do not match!",
             toastLength: Toast.LENGTH_LONG,
@@ -267,10 +358,39 @@ class RegistrationWebService {
         Timer(Duration(milliseconds: 200), () {
           Get.to(() => LoginScreen());
         });
-        return null;
       }
-    }else{
-      print(response);
+    }
+  }
+
+  Future resetDevice(String userName, String password, BuildContext context) async {
+    var head = {
+      "Accept": "application/json",
+      "content-type": "application/json"
+    };
+
+    var response = await http.post(Uri.parse(baseURL + "/api/RestUser"),
+        body: jsonEncode(
+          {
+            "UserName": userName,
+            "appSignature": Platform.isAndroid == true
+                ? androidInfo.id
+                : iosInfo?.identifierForVendor
+          },
+        ),
+        headers: head);
+
+    if (response.statusCode == 200) {
+      var jsonResponse = json.decode(response.body);
+      print('reset info :.....$userName....: $jsonResponse');
+      if (jsonResponse["status"]) {
+        print(jsonResponse["description"]);
+        Get.offAll(()=>ConfirmOTP(userName));
+
+      }
+    } else {
+      print("User reset info :.....$userName");
+      print(response.body);
+      print(response.reasonPhrase);
     }
   }
 
@@ -283,7 +403,7 @@ class RegistrationWebService {
       'Content-Type': 'application/json'
     };
     var request = http.Request(
-        'POST', Uri.parse(baseUrl + '/api/AddPromoterInstallation'));
+        'POST', Uri.parse(baseURL + '/api/AddPromoterInstallation'));
     request.body = json.encode({"PromoterID": promoterIdN});
     request.headers.addAll(headers);
 
@@ -317,93 +437,5 @@ class RegistrationWebService {
     user.name = await prefs.getString('username');
     user.id = await prefs.getString('id');
     user.phone = await prefs.getString('phoneNumber');
-  }
-
-  Future tryToAutoLogin(userName, password) async {
-    final fcmToken = await FirebaseMessaging.instance.getToken();
-    print(" 0000000000 FCM token1: " + fcmToken!);
-
-    var head = {
-      "Accept": "application/json",
-      "content-type": "application/json"
-    };
-
-    var response = await http
-        .post(Uri.parse("$baseUrl/api/Login"),
-            body: jsonEncode(
-              {
-                "UserName": userName,
-                "Password": password,
-                "FCMToken": fcmToken
-              },
-            ),
-            headers: head)
-        .timeout(const Duration(seconds: 10), onTimeout: () {
-      Fluttertoast.showToast(
-          msg: "The connection has timed out, Please try again!",
-          toastLength: Toast.LENGTH_SHORT,
-          gravity: ToastGravity.CENTER,
-          timeInSecForIosWeb: 1,
-          backgroundColor: Colors.white70,
-          textColor: Colors.black,
-          fontSize: 16.0);
-      isLoginLoading = false;
-
-      Get.offAll(() => LoginScreen());
-
-      throw TimeoutException('The connection has timed out, Please try again!');
-    });
-    var jsonResponse = json.decode(response.body);
-
-    if (response.statusCode == 500) {
-      Fluttertoast.showToast(
-          msg: "Error 500",
-          toastLength: Toast.LENGTH_SHORT,
-          gravity: ToastGravity.CENTER,
-          timeInSecForIosWeb: 1,
-          backgroundColor: Colors.white70,
-          textColor: Colors.black,
-          fontSize: 16.0);
-      isLoginLoading = false;
-
-      Get.to(() => LoginScreen());
-    } else if (response.statusCode == 200) {
-      print('user info ::==auto login==::: $jsonResponse');
-
-      if (jsonResponse["status"]) {
-        print('===================true==================');
-        user.id = jsonResponse["description"]['id'];
-        // TODO: store token in shared preferences then navigate to the following screen
-        storeUserLoginPreference(
-            jsonResponse["description"]["token"],
-            jsonResponse["description"]["userName"],
-            password,
-            jsonResponse["description"]["id"],
-            jsonResponse["description"]["phoneNumber"],
-            jsonResponse["description"]["guidUser"]);
-        user.accessToken = jsonResponse["description"]["token"];
-        user.name = jsonResponse["description"]["name"];
-        user.phone = jsonResponse["description"]["phoneNumber"];
-        print("new token  ${jsonResponse["description"]["token"]}");
-
-        //call func to save installation
-        //if(promoterId!="")saveInstallationForPromoters(promoterId);
-        return Timer(const Duration(milliseconds: 200), () {
-          // Get.to(MainScreen(indexOfScreen: 0,));
-        });
-      } else {
-        Fluttertoast.showToast(
-            msg: "Username and password do not match!",
-            toastLength: Toast.LENGTH_LONG,
-            gravity: ToastGravity.CENTER,
-            timeInSecForIosWeb: 1,
-            backgroundColor: Colors.white70,
-            textColor: Colors.black,
-            fontSize: 16.0);
-        Timer(Duration(milliseconds: 200), () {
-          Get.to(() => LoginScreen());
-        });
-      }
-    }
   }
 }

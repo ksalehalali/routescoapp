@@ -18,22 +18,23 @@ class LocationBloc extends Bloc<LocationBlocEvent, LocationBlocState> {
    if(event is FindPlaces){
      try {
        placePredictionList.clear();
-       final places = await locationWebService.findPlace(event.msg);
-       places.forEach((element) {
-         placePredictionList.add(PlaceShort(
-             placeId: element.id,
-             mainText: element.text,
-             secondText: element.place_name,
-             lat: element.lat,
-             lng: element.lng));
-       });
+       // final places = await locationWebService.findPlace(event.msg);
+       // places.forEach((element) {
+       //   placePredictionList.add(PlaceShort(
+       //       placeId: element.id,
+       //       mainText: element.text,
+       //       secondText: element.place_name,
+       //       lat: element.lat,
+       //       lng: element.lng));
+       // });
        print("++++ ${placePredictionList.first.mainText}");
+       emit(LoadedState(""));
      }catch (e){
        print("$e");
      }
    }else if( event is GetCurrentLocation){
-     final location = await locationWebService.getLocation();
-     emit(LoadedState(location));
+     // final location = await locationWebService.getLocation();
+     // emit(LoadedState(location));
    }
     });
   }

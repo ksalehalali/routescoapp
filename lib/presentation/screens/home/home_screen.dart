@@ -3,26 +3,36 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:get/get.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
-import 'package:shared_preferences/shared_preferences.dart';
-import '../../../business_logic/controllers/lang_controller.dart';
+import '../../../Assistants/assistantMethods.dart';
+import '../../../Assistants/globals.dart';
+import '../../../business_logic/controllers/location_controller.dart';
 import '../../../business_logic/cubit/internet_bloc/internet_bloc.dart';
 import '../../../business_logic/cubit/internet_bloc/internet_state.dart';
 import '../../../business_logic/bloc/location_bloc_bloc.dart';
+import '../../../constants/current_data.dart';
 import '../../../constants/strings.dart';
 import '../../../data/models/address.dart';
-import '../../../data/web_services/location_web_service.dart';
+import '../../../data/models/place_short.dart';
+import '../../../data/web_services/request-assistant.dart';
+import '../../widgets/dialogs.dart';
 import '../../widgets/divider.dart';
+import '../../widgets/prediction_tile.dart';
 
 class HomeScreen extends StatefulWidget {
+  static const String idScreen = "HomeScreen";
   HomeScreen({Key? key}) : super(key: key);
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
+bool pickUpFilling = false;
+TextEditingController pickUpController = TextEditingController();
 
+TextEditingController dropOffController = TextEditingController();
 class _HomeScreenState extends State<HomeScreen> {
   int navIndex = 3;
 
@@ -41,13 +51,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
   bool setCustomMarkerDone = false;
 
-  double animatedContainer = 250;
   String dropOffString = "Enter 3 letters to search";
   bool isFocused = false;
-  bool isContainerOpen = false;
+  bool isFocused2 = false;
+  var assistantMethods = AssistantMethods();
+
   bool pickUpFilling = false;
   FocusNode? focusNodePickUp;
   FocusNode? focusNodeDropOff;
+  final LocationController locationController = Get.find();
 
   //custom icon
   void setCustomIconMarker() async {
@@ -64,7 +76,21 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     // TODO: implement initState
     super.initState();
-    locationBloc = BlocProvider.of<LocationBloc>(context);
+  }
+  start()async{
+    Timer(Duration(milliseconds: 100), () {
+      locationController.refreshPlacePredictionList();
+      focusNodeDropOff = FocusNode();
+      focusNodePickUp = FocusNode();
+      if(locationController.addDropOff.value ==true){
+        dropOffController.text = locationController.dropOffAddress.value;
+      }else if(locationController.addPickUp.value == true){
+        pickUpController.text = locationController.pickUpAddress.value;
+      }else{
+        pickUpController.text = '';
+        dropOffController.text = '';
+      }
+    });
   }
   @override
   Widget build(BuildContext context) {
@@ -87,8 +113,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   InkWell(
                       onTap: () {
                         setState(() {
-                          animatedContainer = 100;
-                          isContainerOpen = false;
+                          locationController.animatedContainer.value = 120;
+                          locationController.isContainerOpen.value = false;
                         });
                       },
                       child: const Icon(
@@ -115,23 +141,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
-          body: BlocListener<InternetBloc, InternetState>(
-            listener: (context, state) {
-              if (state is Connected) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content:
-                      Text(state.msg, style: TextStyle(color: Colors.white)),
-                  duration: Duration(seconds: 1),
-                  backgroundColor: Colors.green,
-                ));
-              } else if (state is NotConnected) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(
-                  state.msg,
-                )));
-              }
-            },
-            child: Stack(
+          body:  Stack(
               children: [
                 GoogleMap(
                   initialCameraPosition: cameraPosition,
@@ -146,6 +156,48 @@ class _HomeScreenState extends State<HomeScreen> {
                     _controllerMaps.complete(controller);
                     homeMapController = controller;
                   },
+                  onCameraIdle: ()async{
+                    print('onCameraIdle');
+                    locationController.showPinOnMap.value = true;
+                    locationController.addressText.value = await assistantMethods.searchCoordinateAddress(
+                        locationController.positionFromPin.value, false);
+                    if (locationController.addDropOff.value == true &&
+                        locationController.addPickUp.value == true) {
+
+                    } else {
+                      if (locationController.startAddingPickUp.value == true) {
+                        trip.startPointAddress =  locationController.addressText.value;
+
+                      } else {
+                        trip.endPointAddress =  locationController.addressText.value;
+
+                      }
+                    }
+                    locationController.startMovingCamera.value = false;
+                    locationController.stopMovingCamera.value = true;
+
+
+                  },
+                  onCameraMove: (camera){
+                    locationController.showPinOnMap.value = false;
+                    locationController.updatePinPos(
+                        camera.target.latitude, camera.target.longitude);
+                    locationController.positionFromPin.value = Position(
+                      longitude: camera.target.longitude,
+                      latitude: camera.target.latitude,
+                      speedAccuracy: 1.0,
+                      altitude: camera.target.latitude,
+                      speed: 1.0,
+                      heading: 1.0,
+                      timestamp: DateTime.now(),
+                      accuracy: 1.0,
+                    );
+                  },
+                  onCameraMoveStarted: (){
+                    locationController.startMovingCamera.value = true;
+                    locationController.stopMovingCamera.value = false;
+
+                  },
                 ),
                 Positioned(
                     top: screenSize.height / 2,
@@ -155,184 +207,365 @@ class _HomeScreenState extends State<HomeScreen> {
                       height: 36,
                     )),
                 Positioned(
-                  bottom: 0.0,
-                  child: AnimatedContainer(
-                    width: screenSize.width,
-                    height: animatedContainer,
-                    duration: 300.milliseconds,
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                    ),
-                    child: Column(
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.all(18.0),
-                          child: InkWell(
-                            onTap: () {
-                              animatedContainer = screenSize.height * 0.9 - 20;
-
-                              isFocused = true;
-                              isContainerOpen = true;
-                              setState(() {});
-                            },
-                            child: Container(
-                              padding: EdgeInsets.fromLTRB(
-                                  screenSize.width * 0.03,
-                                  screenSize.width * 0.01,
-                                  screenSize.width * 0.03,
-                                  screenSize.width * 0.01),
-                              height: screenSize.width * 0.11,
-                              width: screenSize.width * 0.9,
-                              decoration: BoxDecoration(
-                                border: Border.all(
-                                  color: Colors.grey.withOpacity(0.5),
-                                  width: 1,
-                                ),
-                                borderRadius: BorderRadius.circular(
-                                    screenSize.width * 0.035),
-                                // color: Colors.grey.withOpacity(0.3)
-                              ),
-                              alignment: Alignment.centerLeft,
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.center,
-                                mainAxisAlignment: MainAxisAlignment.start,
-                                children: [
-                                  Container(
-                                    height: screenSize.width * 0.04,
-                                    width: screenSize.width * 0.04,
-                                    alignment: Alignment.center,
-                                    decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        color: Colors.blue.withOpacity(0.3)),
-                                    child: Container(
-                                      height: screenSize.width * 0.02,
-                                      width: screenSize.width * 0.02,
-                                      decoration: const BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          color: Colors.blue),
-                                    ),
-                                  ),
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 8.0),
-                                    child: SizedBox(
-                                      width: 200,
-                                      child: isContainerOpen
-                                          ? TextFormField(
-                                              autofocus: isFocused,
-                                              decoration: InputDecoration(
-                                                contentPadding:
-                                                    // //  (languageDirection == 'rtl')
-                                                    //      // ? EdgeInsets.only(bottom: screenSize.width * 0.035)
-                                                    //   //    :
-                                                    EdgeInsets.only(
-                                                        bottom:
-                                                            screenSize.width *
-                                                                0.035),
-                                                border: InputBorder.none,
-                                                hintText: dropOffString,
-                                              ),
-                                              maxLines: 1,
-                                              onChanged: (val) {
-                                               locationBloc.add(FindPlaces(msg: val));
-                                              })
-                                          : Container(
-                                              child: Text(dropOffString),
-                                            ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
+                    top:5,
+                    right: 5,
+                    left: 5,
+                    child: Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(4.0),
+                        child: Container(
+                          width: screenSize.width,
+                          height: screenSize.height *0.1 -36,
+                          decoration:BoxDecoration(
+                            color:Colors.white,
+                            borderRadius: BorderRadius.circular(3)
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4.0),
+                            child: Obx(()=> Padding(
+                              padding: const EdgeInsets.all(2.0),
+                              child: Text(locationController.addressText.value,maxLines: 1,overflow:TextOverflow.ellipsis ,textAlign: TextAlign.right,textDirection: TextDirection.ltr,),
+                            )),
                           ),
                         ),
-                        BlocBuilder<LocationBloc, LocationBlocState>(
-                          builder: (context, state) {
-                            if (state is LoadingState) {
-                              return const CircularProgressIndicator();
-                            } else if (state is LoadedState) {
-                              return Text(state.location.latitude.toString());
-                            } else {
-                              return CircularProgressIndicator(
-                                color: Colors.redAccent,
-                              );
-                            }
-                          },
-                        ),
-                      BlocBuilder(builder: (context , state){
-                        if (state is LoadingState) {
-                          return const CircularProgressIndicator();
-                        } else if (state is FindPlaces) {
-                          return       Expanded(
-                            child: Padding(
-                                padding: EdgeInsets.symmetric(
-                                  vertical: 8.0,
-                                  horizontal: 16.0,
-                                ),
-                                child: ListView.separated(
-                                  padding: EdgeInsets.all(0.0),
-                                  itemBuilder: (context, index) => PredictionTile(
-                                    placePredictions: locationBloc.placePredictionList[index],
-                                  ),
-                                  itemCount: locationBloc.placePredictionList.length,
-                                  separatorBuilder: (BuildContext context, index) =>
-                                      DividerWidget(),
-                                  shrinkWrap: true,
-                                  physics: ClampingScrollPhysics(),
-                                )),
-                          );
-                        } else {
-                          return CircularProgressIndicator(
-                            color: Colors.redAccent,
-                          );
-                        }
-                      },
-
                       ),
-                      ElevatedButton(onPressed: (){
-                        locationBloc.add(GetCurrentLocation());
-                      }, child: Text("B1")),
-                        SizedBox(
-                          width: 100,
-                          child: ListTile(
-                            leading: GetBuilder<LangController>(
-                              init: LangController(),
-                              builder: (controller) => DropdownButton(
-                                iconSize: 38,
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  color: Colors.blue[900],
-                                ),
-                                items: const [
-                                  DropdownMenuItem(
-                                    child: Text('EN'),
-                                    value: 'en',
-                                  ),
-                                  DropdownMenuItem(
-                                    child: Text('AR'),
-                                    value: 'ar',
-                                  ),
-                                  // DropdownMenuItem(child: Text('HI'),value: 'hi',)
-                                ],
-                                value: controller.appLocal,
-                                onChanged: (val) async {
-                                  print(val.toString());
-                                  controller.changeLang(val.toString());
-                                  Get.updateLocale(Locale(val.toString()));
-                                  controller.changeDIR(val.toString());
-                                  print(Get.deviceLocale);
-                                  print(Get.locale);
-                                  SharedPreferences prefs =
-                                      await SharedPreferences.getInstance();
+                    )),
+                Positioned(
+                  bottom: 0.0,
+                  child: Obx(()=>AnimatedContainer(
+                      width: screenSize.width,
+                      height: locationController.animatedContainer.value,
+                      duration: 300.milliseconds,
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                      ),
+                      child: Column(
+                        children: [
 
-                                  await prefs.setString('lang', val.toString());
-                                },
+                          Padding(
+                            padding: const EdgeInsets.only(top: 10.0),
+                            child: InkWell(
+                              onTap: () {
+                                locationController.animatedContainer.value = screenSize.height * 0.9 - 20;
+                                setState(() {});
+                                start();
+
+                                Timer(700.milliseconds, () {
+                                  isFocused2 = true;
+                                  locationController.isContainerOpen.value = true;
+                                  setState(() {});
+                                });
+                              },
+                              child: Container(
+                                padding: EdgeInsets.fromLTRB(
+                                    screenSize.width * 0.03,
+                                    screenSize.width * 0.01,
+                                    screenSize.width * 0.03,
+                                    screenSize.width * 0.01),
+                                height: screenSize.width * 0.11,
+                                width: screenSize.width * 0.9,
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                    color: Colors.grey.withOpacity(0.5),
+                                    width: 1,
+                                  ),
+                                  borderRadius: BorderRadius.circular(
+                                      screenSize.width * 0.035),
+                                  // color: Colors.grey.withOpacity(0.3)
+                                ),
+                                alignment: Alignment.centerLeft,
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  mainAxisAlignment: MainAxisAlignment.start,
+                                  children: [
+                                    Container(
+                                      height: screenSize.width * 0.04,
+                                      width: screenSize.width * 0.04,
+                                      alignment: Alignment.center,
+                                      decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: Colors.blue.withOpacity(0.3)),
+                                      child: Container(
+                                        height: screenSize.width * 0.02,
+                                        width: screenSize.width * 0.02,
+                                        decoration: const BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: Colors.blue),
+                                      ),
+                                    ),
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8.0),
+                                      child: SizedBox(
+                                        width: 200,
+                                        child: locationController.isContainerOpen.value
+                                            ? TextFormField(
+                                                autofocus: isFocused,
+                                                decoration: InputDecoration(
+                                                  contentPadding:
+                                                      // //  (languageDirection == 'rtl')
+                                                      //      // ? EdgeInsets.only(bottom: screenSize.width * 0.035)
+                                                      //   //    :
+                                                      EdgeInsets.only(
+                                                          bottom: screenSize.width * 0.012),
+                                                  border: InputBorder.none,
+                                                  hintText:  locationController
+                                                      .gotMyLocation.value ==
+                                                      true
+                                                      ? locationController.pickUpAddress.value
+                                                      : 'loading..._txt'.tr,
+                                                  hintStyle: TextStyle(
+                                                      overflow: TextOverflow.ellipsis,
+
+                                                      color: locationController.gotMyLocation.value == true
+                                                          ? Colors.blue[900] : Colors.red),
+
+                                                  isDense: true,
+                                                ),
+                                                maxLines: 1,
+                                                onChanged: (val) {
+                                                  if(val.length ==0)  locationController.refreshPlacePredictionList();
+                                                  locationController.startAddingPickUpStatus(true);
+                                                  locationController.startAddingDropOffStatus(false);
+                                                  pickUpFilling = true;
+                                                  locationController.findPlace(val);
+                                                })
+                                            : Container(
+                                                child: Text(dropOffString),
+                                              ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
-                            onTap: () {},
                           ),
-                        ),
-                      ],
+                          SizedBox(height:12),
+                          locationController.isContainerOpen.value ==false ?
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                                children: [
+                                  InkWell(
+                                    onTap: (){
+                                      print("PICKUP NOW");
+                                    },
+                                    child: Container(
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(8.0),
+                                        child: Text("PICKUP NOW",style: TextStyle(fontSize: 14),),
+                                      )
+                                    ),
+                                  ),
+                                  Container(
+                                    height:screenSize.height *0.1 -44,
+                                    width: 2,
+                                    color: Colors.grey,
+                                  ),
+                                  InkWell(
+                                    onTap: (){
+                                      print("PICKUP LATER");
+                                    },
+                                    child: Container(
+                                        child: Padding(
+                                          padding: const EdgeInsets.all(8.0),
+                                          child: Text("PICKUP LATER",style: TextStyle(fontSize: 14),),
+                                        )
+                                    ),
+                                  )
+                                ],
+                              ):Container(),
+                          locationController.isContainerOpen.value
+                        ?   Padding(
+                            padding: const EdgeInsets.all(18.0),
+                            child: InkWell(
+                              onTap: () {
+                                locationController.animatedContainer.value = screenSize.height * 0.9 - 20;
+
+                                isFocused = true;
+                                locationController.isContainerOpen.value = true;
+                                setState(() {});
+                              },
+                              child: Container(
+                                padding: EdgeInsets.fromLTRB(
+                                    screenSize.width * 0.03,
+                                    screenSize.width * 0.01,
+                                    screenSize.width * 0.03,
+                                    screenSize.width * 0.01),
+                                height: screenSize.width * 0.11,
+                                width: screenSize.width * 0.9,
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                    color: Colors.grey.withOpacity(0.5),
+                                    width: 1,
+                                  ),
+                                  borderRadius: BorderRadius.circular(
+                                      screenSize.width * 0.035),
+                                  // color: Colors.grey.withOpacity(0.3)
+                                ),
+                                alignment: Alignment.centerLeft,
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  mainAxisAlignment: MainAxisAlignment.start,
+                                  children: [
+                                    Container(
+                                      height: screenSize.width * 0.04,
+                                      width: screenSize.width * 0.04,
+                                      alignment: Alignment.center,
+                                      decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: Colors.red.withOpacity(0.3)),
+                                      child: Container(
+                                        height: screenSize.width * 0.02,
+                                        width: screenSize.width * 0.02,
+                                        decoration: const BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: Colors.red),
+                                      ),
+                                    ),
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8.0),
+                                      child: SizedBox(
+                                        width: 200,
+                                        child:TextFormField(
+                                            autofocus: isFocused2,
+                                            decoration: InputDecoration(
+                                              contentPadding:
+                                              // //  (languageDirection == 'rtl')
+                                              //      // ? EdgeInsets.only(bottom: screenSize.width * 0.035)
+                                              //   //    :
+                                              EdgeInsets.only(
+                                                  bottom:
+                                                  screenSize.width *
+                                                      0.012),
+                                              border: InputBorder.none,
+                                              hintText: "where_To?_txt".tr,
+
+                                              hintStyle: TextStyle(
+                                                  overflow: TextOverflow.ellipsis,
+                                                  color: locationController
+                                                      .gotMyLocation.value ==
+                                                      true
+                                                      ? Colors.blue[900]
+                                                      : Colors.red),
+
+                                              filled: false,
+                                              isDense: true,
+
+                                            ),
+
+                                            maxLines: 1,
+                                            onChanged: (val) {
+                                              if(val.length ==0)  locationController.refreshPlacePredictionList();
+                                              locationController.startAddingPickUpStatus(true);
+                                              locationController.startAddingDropOffStatus(false);
+                                              pickUpFilling = true;
+                                              locationController.findPlace(val);
+                                            },
+                                        onTap: (){
+                                          pickUpFilling = true;
+                                          locationController.startAddingPickUpStatus(true);
+                                          locationController.startAddingDropOffStatus(false);
+                                        },
+                                          onFieldSubmitted: (val) {
+                                            FocusScope.of(context)
+                                                .requestFocus(focusNodeDropOff);
+                                          },
+                                        )
+
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ) : Container(
+                    ),
+                          SizedBox(
+                            height: 3,
+                          ),
+                          //tile for predictions
+                          locationController.isContainerOpen.value? Obx(() {
+                            return Expanded(
+                              child: Padding(
+                                  padding: EdgeInsets.symmetric(
+                                    vertical: 8.0,
+                                    horizontal: 16.0,
+                                  ),
+                                  child: ListView.separated(
+                                    padding: EdgeInsets.all(0.0),
+                                    itemBuilder: (context, index) => PredictionTile(
+                                      placePredictions:
+                                      locationController.placePredictionList[index],
+                                    ),
+                                    itemCount: locationController.placePredictionList.length,
+                                    separatorBuilder: (BuildContext context, index) =>
+                                        DividerWidget(),
+                                    shrinkWrap: true,
+                                    physics: ClampingScrollPhysics(),
+                                  )),
+                            );
+                          }):Container()
+                        //   BlocBuilder<LocationBloc, LocationBlocState>(
+                        //     builder: (context, state) {
+                        //       if (state is LoadingState) {
+                        //         return const CircularProgressIndicator();
+                        //       } else if (state is LoadedState) {
+                        //         return Text(state.location.latitude.toString());
+                        //       } else {
+                        //         return CircularProgressIndicator(
+                        //           color: Colors.redAccent,
+                        //         );
+                        //       }
+                        //     },
+                        //   ),
+                        //
+                        // ElevatedButton(onPressed: (){
+                        //   locationBloc.add(GetCurrentLocation());
+                        // }, child: Text("B1")),
+                        //   SizedBox(
+                        //     width: 100,
+                        //     child: ListTile(
+                        //       leading: GetBuilder<LangController>(
+                        //         init: LangController(),
+                        //         builder: (controller) => DropdownButton(
+                        //           iconSize: 38,
+                        //           style: TextStyle(
+                        //             fontSize: 18,
+                        //             color: Colors.blue[900],
+                        //           ),
+                        //           items: const [
+                        //             DropdownMenuItem(
+                        //               child: Text('EN'),
+                        //               value: 'en',
+                        //             ),
+                        //             DropdownMenuItem(
+                        //               child: Text('AR'),
+                        //               value: 'ar',
+                        //             ),
+                        //             // DropdownMenuItem(child: Text('HI'),value: 'hi',)
+                        //           ],
+                        //           value: controller.appLocal,
+                        //           onChanged: (val) async {
+                        //             print(val.toString());
+                        //             controller.changeLang(val.toString());
+                        //             Get.updateLocale(Locale(val.toString()));
+                        //             controller.changeDIR(val.toString());
+                        //             print(Get.deviceLocale);
+                        //             print(Get.locale);
+                        //             SharedPreferences prefs =
+                        //                 await SharedPreferences.getInstance();
+                        //
+                        //             await prefs.setString('lang', val.toString());
+                        //           },
+                        //         ),
+                        //       ),
+                        //       onTap: () {},
+                        //     ),
+                        //   ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -340,166 +573,10 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ),
-      ),
+
     );
   }
 }
 
-bool pickUpFilling = false;
-TextEditingController pickUpController = TextEditingController();
-
-TextEditingController dropOffController = TextEditingController();
-
-class PredictionTile extends StatelessWidget {
-  final PlaceShort? placePredictions;
-
-  PredictionTile({Key? key, this.placePredictions}) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
 
 
-    return InkWell(
-      onTap: () {
-        Address address = Address(
-          placeName: placePredictions!.mainText,
-        );
-
-        if (placePredictions!.placeId == '0') {
-          // initialPoint.latitude = locationController.currentLocation.value.latitude;
-          // initialPoint.longitude = locationController.currentLocation.value.longitude;
-          // locationController.buttonString.value = 'confirm_drop_off_spot_txt'.tr;
-          // locationController.startAddingDropOff.value = true;
-          // locationController.startAddingPickUpStatus(false);
-          // locationController.startAddingDropOffStatus(true);
-
-         // Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (context) => Map()), (route) => false);
-        } else {
-          getPlaceAddressDetails(placePredictions!.placeId!, context);
-          //print(placePredictions!.placeId);
-
-          // initialPoint.latitude = placePredictions!.lat!;
-          // initialPoint.longitude = placePredictions!.lng!;
-          // locationController.showPinOnMap.value = true;
-
-          if (pickUpFilling == false) {
-
-            locati.buttonString.value = 'confirm_drop_off_spot_txt'.tr;
-            locationController.updatePickUpLocationAddress(address);
-
-            trip.endPointAddress =
-            "${placePredictions!.mainText!} ,${placePredictions!.secondText!}";
-            Navigator.pushAndRemoveUntil(
-                context,
-                MaterialPageRoute(builder: (context) => Map()),
-                    (route) => false);
-          } else {
-            locationController.updateDropOffLocationAddress(address);
-            locationController.buttonString.value = 'confirm_pick_up_spot_txt'.tr;
-
-            trip.startPointAddress =
-            "${placePredictions!.mainText!} ,${placePredictions!.secondText!}";
-            locationController.changePickUpAddress(
-                "${placePredictions!.mainText!} ,${placePredictions!.secondText!}");
-            Navigator.pushAndRemoveUntil(
-                context,
-                MaterialPageRoute(builder: (context) => Map()),
-                    (route) => false);
-          }
-        }
-
-      },
-      child: Container(
-        child: Column(
-          children: [
-            SizedBox(
-              width: 10.0,
-            ),
-            Row(
-              children: [
-                Icon(Icons.add_location),
-                SizedBox(
-                  width: 14.0,
-                ),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        placePredictions!.mainText!,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 16.0),
-                      ),
-                      SizedBox(height: 4.0),
-                      Text(
-                        placePredictions!.secondText!,
-                        overflow: TextOverflow.ellipsis,
-                        style:
-                        TextStyle(fontSize: 12.0, color: Colors.grey[600]),
-                      ),
-                      SizedBox(
-                        height: 8,
-                      )
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            SizedBox(
-              width: 14.0,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void getPlaceAddressDetails(String placeId, context) async {
-    final LocationController locationController = Get.find();
-    final RouteMapController routeMapController = Get.find();
-
-    showDialog(
-        context: context,
-        builder: (BuildContext context) => ProgressDialog(
-          message: "Setting DropOff , Please wait ...",
-        ));
-
-    String placeDetailsURL =
-        "https://maps.googleapis.com/maps/api/place/details/json?place_id=$placeId&key=$mapKey";
-
-    var res = await RequestAssistant.getRequest(placeDetailsURL);
-
-    if (res == "failed") {
-      return;
-    }
-
-    if (res["status"] == "OK") {
-      Address address = Address();
-
-      address.placeName = res["result"]["name"];
-      address.placeId = placeId;
-      address.latitude = res["result"]["geometry"]["location"]["lat"];
-      address.longitude = res["result"]["geometry"]["location"]["lng"];
-
-      // initialPoint.latitude = address.latitude!;
-      // initialPoint.longitude = address.longitude!;
-      locationController.updateDropOffLocationAddress(address);
-
-      locationController.positionFromPin.value = Position(
-        longitude:address.longitude!,
-        latitude: address.latitude!,
-        speedAccuracy: 1.0,
-        altitude:  address.latitude!,
-        speed: 1.0,
-        heading: 1.0,
-        timestamp: DateTime.now(),
-        accuracy: 1.0,
-      );
-      print("this drop off location :: ${address.placeName}");
-      print(
-          "this drop off location :: lat ${address.latitude} ,long ${address.longitude}");
-      Navigator.pushAndRemoveUntil(context,
-          MaterialPageRoute(builder: (context) => Map()), (route) => false);
-    }
-  }
-}
